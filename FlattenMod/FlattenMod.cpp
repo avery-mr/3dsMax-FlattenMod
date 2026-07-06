@@ -221,7 +221,7 @@ static ParamBlockDesc2 flattenmod_param_blk(
 	pb_flatten_value, _T("flatten_value"), TYPE_FLOAT, P_ANIMATABLE, IDS_FLATTEN_VALUE,
 	p_default, 0.0f,
 	p_range, -1000000.0f, 1000000.0f,
-	p_ui, TYPE_SPINNER, EDITTYPE_FLOAT, IDC_EDIT_VALUE, IDC_SPIN_VALUE, 0.1f,
+	p_ui, TYPE_SPINNER, EDITTYPE_UNIVERSE, IDC_EDIT_VALUE, IDC_SPIN_VALUE, 0.1f,
 	p_end,
 
 	// weight
@@ -300,14 +300,168 @@ void FlattenMod::NotifyPostCollapse(INode* /*node*/, Object* /*obj*/, IDerivedOb
 #pragma message(TODO("Perform any Post Stack collapse methods here."))
 }
 
-/*************************************************************************************************
+
+// Builds a BitArray of verts to affect based on current selection level
+// For vert sel: direct. For edge/face sel: collect verts from selected edges/faces.
+void GetVertInfluences_MN(MNMesh& mesh, float weight, Tab<float>& influences)
+{
+	influences.SetCount(mesh.numv);
+	for (int i = 0; i < mesh.numv; i++)
+		influences[i] = 0.0f;
+
+	float* softSel = mesh.getVSelectionWeights();
+
+	if (softSel)
+	{
+		// soft selection active — use weights directly regardless of sel level
+		for (int i = 0; i < mesh.numv; i++)
+		{
+			if (mesh.v[i].GetFlag(MN_DEAD)) continue;
+			influences[i] = softSel[i] * weight;
+		}
+		return;
+	}
+
+	// no soft selection — build binary influences from selection level
+	bool anySelection = false;
+
+	switch (mesh.selLevel)
+	{
+	case MNM_SL_VERTEX:
+		for (int i = 0; i < mesh.numv; i++)
+		{
+			if (mesh.v[i].GetFlag(MN_DEAD)) continue;
+			if (mesh.v[i].GetFlag(MN_SEL))
+			{
+				influences[i] = weight;
+				anySelection = true;
+			}
+		}
+		break;
+
+	case MNM_SL_EDGE:
+		for (int i = 0; i < mesh.nume; i++)
+		{
+			if (mesh.e[i].GetFlag(MN_DEAD)) continue;
+			if (mesh.e[i].GetFlag(MN_SEL))
+			{
+				influences[mesh.e[i].v1] = weight;
+				influences[mesh.e[i].v2] = weight;
+				anySelection = true;
+			}
+		}
+		break;
+
+	case MNM_SL_FACE:
+		for (int i = 0; i < mesh.numf; i++)
+		{
+			if (mesh.f[i].GetFlag(MN_DEAD)) continue;
+			if (mesh.f[i].GetFlag(MN_SEL))
+			{
+				for (int j = 0; j < mesh.f[i].deg; j++)
+				{
+					influences[mesh.f[i].vtx[j]] = weight;
+					anySelection = true;
+				}
+			}
+		}
+		break;
+
+	default:
+		break;
+	}
+
+	// no selection at all — affect everything
+	if (!anySelection)
+	{
+		for (int i = 0; i < mesh.numv; i++)
+		{
+			if (mesh.v[i].GetFlag(MN_DEAD)) continue;
+			influences[i] = weight;
+		}
+	}
+}
+
+void GetVertInfluences_Tri(Mesh& mesh, float weight, Tab<float>& influences)
+{
+	influences.SetCount(mesh.numVerts);
+	for (int i = 0; i < mesh.numVerts; i++)
+		influences[i] = 0.0f;
+
+	float* softSel = mesh.getVSelectionWeights();
+
+	if (softSel)
+	{
+		for (int i = 0; i < mesh.numVerts; i++)
+			influences[i] = softSel[i] * weight;
+		return;
+	}
+
+	bool anySelection = false;
+
+	switch (mesh.selLevel)
+	{
+	case MESH_VERTEX:
+	{
+		BitArray& sel = mesh.VertSel();
+		for (int i = 0; i < mesh.numVerts; i++)
+		{
+			if (sel[i])
+			{
+				influences[i] = weight;
+				anySelection = true;
+			}
+		}
+		break;
+	}
+
+	case MESH_EDGE:
+		for (int i = 0; i < mesh.numFaces; i++)
+		{
+			for (int j = 0; j < 3; j++)
+			{
+				if (mesh.EdgeSel()[i * 3 + j])
+				{
+					influences[mesh.faces[i].v[j]] = weight;
+					influences[mesh.faces[i].v[(j + 1) % 3]] = weight;
+					anySelection = true;
+				}
+			}
+		}
+		break;
+
+	case MESH_FACE:
+	{
+		BitArray& sel = mesh.FaceSel();
+		for (int i = 0; i < mesh.numFaces; i++)
+		{
+			if (sel[i])
+			{
+				influences[mesh.faces[i].v[0]] = weight;
+				influences[mesh.faces[i].v[1]] = weight;
+				influences[mesh.faces[i].v[2]] = weight;
+				anySelection = true;
+			}
+		}
+		break;
+	}
+
+	default:
+		break;
+	}
+
+	if (!anySelection)
+	{
+		for (int i = 0; i < mesh.numVerts; i++)
+			influences[i] = weight;
+	}
+}/*************************************************************************************************
 *
 	ModifyObject will do all the work in a full modifier
 	This includes casting objects to their correct form, doing modifications
 	changing their parameters, etc
 *
 \************************************************************************************************/
-
 void FlattenMod::ModifyObject(TimeValue t, ModContext& mc, ObjectState* os, INode* node)
 {
 	// Read params
@@ -321,24 +475,16 @@ void FlattenMod::ModifyObject(TimeValue t, ModContext& mc, ObjectState* os, INod
 	pblock->GetValue(pb_flatten_value, t, flattenValue, FOREVER);
 	pblock->GetValue(pb_weight, t, weight, FOREVER);
 
-
-
 	// ---- PolyObject path ----
 	if (os->obj->IsSubClassOf(polyObjectClassID))
 	{
 		PolyObject* poly = static_cast<PolyObject*>(os->obj);
 		MNMesh& mesh = poly->GetMesh();
 
-		float* softSel = mesh.getVSelectionWeights();
+		Tab<float> influences;
+		GetVertInfluences_MN(mesh, weight, influences);
 
-		// check if any verts are selected
-		bool hasSelection = false;
-		for (int i = 0; i < mesh.numv; i++)
-		{
-			if (mesh.v[i].GetFlag(MN_DEAD)) continue;
-			if (mesh.v[i].GetFlag(MN_SEL)) { hasSelection = true; break; }
-		}
-
+		// compute average if needed
 		if (mode == 1)
 		{
 			double sum = 0.0;
@@ -346,17 +492,7 @@ void FlattenMod::ModifyObject(TimeValue t, ModContext& mc, ObjectState* os, INod
 			for (int i = 0; i < mesh.numv; i++)
 			{
 				if (mesh.v[i].GetFlag(MN_DEAD)) continue;
-
-				// only average verts that will be affected
-				if (softSel)
-				{
-					if (softSel[i] <= 0.0f) continue;
-				}
-				else if (hasSelection)
-				{
-					if (!mesh.v[i].GetFlag(MN_SEL)) continue;
-				}
-
+				if (influences[i] == 0.0f) continue;
 				sum += mesh.v[i].p[axis];
 				count++;
 			}
@@ -364,31 +500,12 @@ void FlattenMod::ModifyObject(TimeValue t, ModContext& mc, ObjectState* os, INod
 				flattenValue = (float)(sum / count);
 		}
 
-		// apply
 		for (int i = 0; i < mesh.numv; i++)
 		{
 			if (mesh.v[i].GetFlag(MN_DEAD)) continue;
-
-			float influence;
-
-			if (softSel != nullptr)
-			{
-				influence = softSel[i];
-				if (influence <= 0.0f) continue;
-				influence *= weight;
-			}
-			else if (hasSelection)
-			{
-				if (!mesh.v[i].GetFlag(MN_SEL)) continue;
-				influence = weight;
-			}
-			else
-			{
-				influence = weight;
-			}
-
+			if (influences[i] == 0.0f) continue;
 			float orig = mesh.v[i].p[axis];
-			mesh.v[i].p[axis] = orig + (flattenValue - orig) * influence;
+			mesh.v[i].p[axis] = orig + (flattenValue - orig) * influences[i];
 		}
 
 		mesh.InvalidateGeomCache();
@@ -401,26 +518,17 @@ void FlattenMod::ModifyObject(TimeValue t, ModContext& mc, ObjectState* os, INod
 		TriObject* tri = static_cast<TriObject*>(os->obj);
 		Mesh& mesh = tri->GetMesh();
 
-		float* softSel = mesh.getVSelectionWeights();
-		BitArray& sel = mesh.VertSel();
-		bool hasSelection = sel.AnyBitSet();
+		Tab<float> influences;
+		GetVertInfluences_Tri(mesh, weight, influences);
 
+		// compute average if needed
 		if (mode == 1)
 		{
 			double sum = 0.0;
 			int count = 0;
 			for (int i = 0; i < mesh.numVerts; i++)
 			{
-				// only average verts that will be affected
-				if (softSel)
-				{
-					if (softSel[i] <= 0.0f) continue;
-				}
-				else if (hasSelection)
-				{
-					if (!sel[i]) continue;
-				}
-
+				if (influences[i] == 0.0f) continue;
 				sum += mesh.verts[i][axis];
 				count++;
 			}
@@ -428,35 +536,19 @@ void FlattenMod::ModifyObject(TimeValue t, ModContext& mc, ObjectState* os, INod
 				flattenValue = (float)(sum / count);
 		}
 
-		// apply
 		for (int i = 0; i < mesh.numVerts; i++)
 		{
-			float influence;
-
-			if (softSel != nullptr)
-			{
-				influence = softSel[i];
-				if (influence <= 0.0f) continue;
-				influence *= weight;
-			}
-			else if (hasSelection)
-			{
-				if (!sel[i]) continue;
-				influence = weight;
-			}
-			else
-			{
-				influence = weight;
-			}
-
+			if (influences[i] == 0.0f) continue;
 			float orig = mesh.verts[i][axis];
-			mesh.verts[i][axis] = orig + (flattenValue - orig) * influence;
+			mesh.verts[i][axis] = orig + (flattenValue - orig) * influences[i];
 		}
 
 		mesh.InvalidateGeomCache();
 		return;
 	}
+
 }
+
 void FlattenMod::BeginEditParams(IObjParam* ip, ULONG flags, Animatable* prev)
 {
 	TimeValue t = ip->GetTime();

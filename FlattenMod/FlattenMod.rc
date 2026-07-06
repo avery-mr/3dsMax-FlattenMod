@@ -55,7 +55,7 @@ STRINGTABLE DISCARDABLE
 BEGIN
 IDS_LIBDESCRIPTION      ""
 IDS_CATEGORY            "RyViz Tools"
-IDS_CLASS_NAME          "Flatten"
+IDS_CLASS_NAME          "RyFlatten"
 IDS_PARAMS              "Parameters"
 IDS_SPIN                "Spin"
 IDS_AXIS                "Axis"
