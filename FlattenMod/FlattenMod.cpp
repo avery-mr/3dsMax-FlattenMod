@@ -1,0 +1,562 @@
+//**************************************************************************/
+// Copyright (c) 1998-2020 Autodesk, Inc.
+// All rights reserved.
+// 
+// Use of this software is subject to the terms of the Autodesk license 
+// agreement provided at the time of installation or download, or which 
+// otherwise accompanies this software in either electronic or hard copy form.
+//**************************************************************************/
+// DESCRIPTION: Plugin Wizard generated plugin
+// AUTHOR: 
+//***************************************************************************/
+
+#include "FlattenMod.h"
+
+#define FlattenMod_CLASS_ID Class_ID(0xb29964f2, 0x69c615b7)
+
+
+#define PBLOCK_REF 0
+
+
+class FlattenMod : public Modifier
+{
+public:
+	// Constructor/Destructor
+	FlattenMod();
+	virtual ~FlattenMod();
+
+	void DeleteThis() override { delete this; }
+
+	// From Animatable
+	const TCHAR* GetObjectName(bool localized) const override { return localized ? GetString(IDS_CLASS_NAME) : _T("FlattenMod"); }
+
+	ChannelMask ChannelsUsed() override { return GEOM_CHANNEL | TOPO_CHANNEL | SELECT_CHANNEL; }
+#pragma message(TODO("Add the channels that the modifier actually modifies"))
+	ChannelMask ChannelsChanged() override { return GEOM_CHANNEL; }
+
+#pragma message(TODO("Return the ClassID of the object that the modifier can modify"))
+	Class_ID InputType() override { return defObjectClassID; }
+
+	void ModifyObject(TimeValue t, ModContext& mc, ObjectState* os, INode* node) override;
+	void NotifyInputChanged(const Interval& changeInt, PartID partID, RefMessage message, ModContext* mc) override;
+
+	void NotifyPreCollapse(INode* node, IDerivedObject* derObj, int index) override;
+	void NotifyPostCollapse(INode* node, Object* obj, IDerivedObject* derObj, int index) override;
+
+	Interval LocalValidity(TimeValue t) override;
+
+// From BaseObject
+#pragma message(TODO("Return true if the modifier changes topology"))
+	BOOL ChangeTopology() override { return FALSE; }
+
+	CreateMouseCallBack* GetCreateMouseCallBack() override { return NULL; }
+
+	BOOL HasUVW() override;
+	void SetGenUVW(BOOL sw) override;
+
+	void BeginEditParams(IObjParam* ip, ULONG flags, Animatable* prev) override;
+	void EndEditParams(IObjParam* ip, ULONG flags, Animatable* next) override;
+
+	virtual Interval GetValidity(TimeValue t);
+
+	// Automatic texture support
+
+	// Loading/Saving
+	IOResult Load(ILoad* iload) override;
+	IOResult Save(ISave* isave) override;
+
+	// From Animatable
+	Class_ID ClassID() override { return FlattenMod_CLASS_ID; }
+	SClass_ID SuperClassID() override { return OSM_CLASS_ID; }
+	void GetClassName(TSTR& s, bool localized) const override { s = localized ? GetString(IDS_CLASS_NAME) : _T("FlattenMod"); }
+
+	RefTargetHandle Clone(RemapDir& remap) override;
+	RefResult NotifyRefChanged(const Interval& changeInt, RefTargetHandle hTarget, PartID& partID, RefMessage message, BOOL propagate) override;
+
+	int NumSubs() override { return 1; }
+	TSTR SubAnimName(int /*i*/, bool localized) override { return localized ? GetString(IDS_PARAMS) : _T("Parameters"); }
+	Animatable* SubAnim(int /*i*/) override { return pblock; }
+
+	// TODO: Maintain the number or references here
+	int NumRefs() override { return 1; }
+	RefTargetHandle GetReference(int i) override;
+
+	int NumParamBlocks() override { return 1; } // Return number of ParamBlocks in this instance
+	IParamBlock2* GetParamBlock(int /*i*/) override { return pblock; } // Return i'th ParamBlock
+	IParamBlock2* GetParamBlockByID(BlockID id) override { return (pblock->ID() == id) ? pblock : NULL; } // Return id'd ParamBlock
+
+protected:
+	void SetReference(int, RefTargetHandle rtarg) override;
+
+public:
+	// Parameter block
+	IParamBlock2* pblock; // Ref 0
+};
+
+void FlattenMod::SetReference(int i, RefTargetHandle rtarg)
+{
+	if (i == PBLOCK_REF)
+	{
+		pblock = (IParamBlock2*)rtarg;
+	}
+}
+
+RefTargetHandle FlattenMod::GetReference(int i)
+{
+	if (i == PBLOCK_REF)
+	{
+		return pblock;
+	}
+
+	return nullptr;
+}
+
+
+class FlattenModClassDesc : public ClassDesc2 
+{
+public:
+	int           IsPublic() override                               { return TRUE; }
+	void*         Create(BOOL /*loading = FALSE*/) override         { return new FlattenMod(); }
+	const TCHAR*  ClassName() override                              { return GetString(IDS_CLASS_NAME); }
+	const TCHAR*  NonLocalizedClassName() override                  { return _T("FlattenMod"); }
+	SClass_ID     SuperClassID() override                           { return OSM_CLASS_ID; }
+	Class_ID      ClassID() override                                { return FlattenMod_CLASS_ID; }
+	const TCHAR*  Category() override                               { return GetString(IDS_CATEGORY); }
+
+	const TCHAR*  InternalName() override                           { return _T("FlattenMod"); } // Returns fixed parsable name (scripter-visible name)
+	HINSTANCE     HInstance() override                              { return hInstance; } // Returns owning module handle
+
+
+};
+
+ClassDesc2* GetFlattenModDesc()
+{
+	static FlattenModClassDesc FlattenModDesc;
+	return &FlattenModDesc; 
+}
+
+class FlattenModDlgProc : public ParamMap2UserDlgProc
+{
+public:
+	FlattenMod* mod;
+
+	FlattenModDlgProc(FlattenMod* m) : mod(m) {}
+
+	INT_PTR DlgProc(TimeValue t, IParamMap2* map, HWND hWnd,
+		UINT msg, WPARAM wParam, LPARAM lParam) override
+	{
+		switch (msg)
+		{
+		case WM_INITDIALOG:
+			UpdateAxisButtons(hWnd);
+			UpdateModeButtons(hWnd);
+			break;
+
+		case WM_COMMAND:
+			switch (LOWORD(wParam))
+			{
+			case IDC_RADIO_X:
+				mod->pblock->SetValue(pb_axis, t, 0);
+				break;
+			case IDC_RADIO_Y:
+				mod->pblock->SetValue(pb_axis, t, 1);
+				break;
+			case IDC_RADIO_Z:
+				mod->pblock->SetValue(pb_axis, t, 2);
+				break;
+			case IDC_RADIO_TOVALUE:
+				mod->pblock->SetValue(pb_flatten_mode, t, 0);
+				break;
+			case IDC_RADIO_TOAVERAGE:
+				mod->pblock->SetValue(pb_flatten_mode, t, 1);
+				break;
+			}
+			break;
+		}
+		return FALSE;
+	}
+
+	void UpdateAxisButtons(HWND hWnd)
+	{
+		int axis = 0;
+		mod->pblock->GetValue(pb_axis, 0, axis, FOREVER);
+		CheckDlgButton(hWnd, IDC_RADIO_X, axis == 0);
+		CheckDlgButton(hWnd, IDC_RADIO_Y, axis == 1);
+		CheckDlgButton(hWnd, IDC_RADIO_Z, axis == 2);
+	}
+
+	void UpdateModeButtons(HWND hWnd)
+	{
+		int mode = 0;
+		mod->pblock->GetValue(pb_flatten_mode, 0, mode, FOREVER);
+		CheckDlgButton(hWnd, IDC_RADIO_TOVALUE, mode == 0);
+		CheckDlgButton(hWnd, IDC_RADIO_TOAVERAGE, mode == 1);
+	}
+
+	void DeleteThis() override { delete this; }
+};
+
+
+
+
+static ParamBlockDesc2 flattenmod_param_blk(
+	flattenmod_params, _T("params"), 0, GetFlattenModDesc(),
+	P_AUTO_CONSTRUCT + P_AUTO_UI, PBLOCK_REF,
+	// rollout
+	IDD_PANEL, IDS_PARAMS, 0, 0, NULL,
+
+	// axis
+	pb_axis, _T("axis"), TYPE_INT, 0, IDS_AXIS,
+	p_default, 2,  // default Z
+	p_range, 0, 2,
+	p_end,
+
+	// flatten mode
+	pb_flatten_mode, _T("flatten_mode"), TYPE_INT, 0, IDS_FLATTEN_MODE,
+	p_default, 0,  // default ToValue
+	p_range, 0, 1,
+	p_end,
+
+	// flatten value
+	pb_flatten_value, _T("flatten_value"), TYPE_FLOAT, P_ANIMATABLE, IDS_FLATTEN_VALUE,
+	p_default, 0.0f,
+	p_range, -1000000.0f, 1000000.0f,
+	p_ui, TYPE_SPINNER, EDITTYPE_FLOAT, IDC_EDIT_VALUE, IDC_SPIN_VALUE, 0.1f,
+	p_end,
+
+	// weight
+	pb_weight, _T("weight"), TYPE_FLOAT, P_ANIMATABLE, IDS_WEIGHT,
+	p_default, 1.0f,
+	p_range, 0.0f, 1.0f,
+	p_ui, TYPE_SPINNER, EDITTYPE_FLOAT, IDC_EDIT_WEIGHT, IDC_SPIN_WEIGHT, 0.01f,
+	p_end,
+
+	p_end
+);
+
+
+
+//--- FlattenMod -------------------------------------------------------
+FlattenMod::FlattenMod()
+	: pblock(nullptr)
+{
+	GetFlattenModDesc()->MakeAutoParamBlocks(this);
+}
+
+FlattenMod::~FlattenMod()
+{
+
+}
+
+/*===========================================================================*\
+ |  The validity of the parameters. First a test for editing is performed
+ |  then Start at FOREVER, and intersect with the validity of each item
+\*===========================================================================*/
+Interval FlattenMod::LocalValidity(TimeValue /*t*/)
+{
+
+	return FOREVER;
+}
+
+/*************************************************************************************************
+*
+	Between NotifyPreCollapse and NotifyPostCollapse, Modify is
+	called by the system. NotifyPreCollapse can be used to save any plugin dependant data e.g.
+	LocalModData
+*
+\*************************************************************************************************/
+
+void FlattenMod::NotifyPreCollapse(INode* /*node*/, IDerivedObject* /*derObj*/, int /*index*/)
+{
+#pragma message(TODO("Perform any Pre Stack Collapse methods here"))
+}
+
+/*************************************************************************************************
+*
+	NotifyPostCollapse can be used to apply the modifier back onto to the stack, copying over the
+	stored data from the temporary storage. To reapply the modifier the following code can be
+	used
+
+	Object* bo = node->GetObjectRef();
+	IDerivedObject* derob = NULL;
+	if(bo->SuperClassID() != GEN_DERIVOB_CLASS_ID)
+	{
+		derob = CreateDerivedObject(obj);
+		node->SetObjectRef(derob);
+	}
+	else
+	{
+		derob = (IDerivedObject*) bo;
+	}
+
+	// Add ourselves to the top of the stack
+	derob->AddModifier(this,NULL,derob->NumModifiers());
+
+*
+\*************************************************************************************************/
+
+void FlattenMod::NotifyPostCollapse(INode* /*node*/, Object* /*obj*/, IDerivedObject* /*derObj*/, int /*index*/)
+{
+#pragma message(TODO("Perform any Post Stack collapse methods here."))
+}
+
+/*************************************************************************************************
+*
+	ModifyObject will do all the work in a full modifier
+	This includes casting objects to their correct form, doing modifications
+	changing their parameters, etc
+*
+\************************************************************************************************/
+
+void FlattenMod::ModifyObject(TimeValue t, ModContext& mc, ObjectState* os, INode* node)
+{
+	// Read params
+	int   axis = 2;     // default Z
+	int   mode = 0;     // default ToValue
+	float flattenValue = 0.0f;
+	float weight = 1.0f;
+
+	pblock->GetValue(pb_axis, t, axis, FOREVER);
+	pblock->GetValue(pb_flatten_mode, t, mode, FOREVER);
+	pblock->GetValue(pb_flatten_value, t, flattenValue, FOREVER);
+	pblock->GetValue(pb_weight, t, weight, FOREVER);
+
+
+
+	// ---- PolyObject path ----
+	if (os->obj->IsSubClassOf(polyObjectClassID))
+	{
+		PolyObject* poly = static_cast<PolyObject*>(os->obj);
+		MNMesh& mesh = poly->GetMesh();
+
+		float* softSel = mesh.getVSelectionWeights();
+
+		// check if any verts are selected
+		bool hasSelection = false;
+		for (int i = 0; i < mesh.numv; i++)
+		{
+			if (mesh.v[i].GetFlag(MN_DEAD)) continue;
+			if (mesh.v[i].GetFlag(MN_SEL)) { hasSelection = true; break; }
+		}
+
+		if (mode == 1)
+		{
+			double sum = 0.0;
+			int count = 0;
+			for (int i = 0; i < mesh.numv; i++)
+			{
+				if (mesh.v[i].GetFlag(MN_DEAD)) continue;
+
+				// only average verts that will be affected
+				if (softSel)
+				{
+					if (softSel[i] <= 0.0f) continue;
+				}
+				else if (hasSelection)
+				{
+					if (!mesh.v[i].GetFlag(MN_SEL)) continue;
+				}
+
+				sum += mesh.v[i].p[axis];
+				count++;
+			}
+			if (count > 0)
+				flattenValue = (float)(sum / count);
+		}
+
+		// apply
+		for (int i = 0; i < mesh.numv; i++)
+		{
+			if (mesh.v[i].GetFlag(MN_DEAD)) continue;
+
+			float influence;
+
+			if (softSel != nullptr)
+			{
+				influence = softSel[i];
+				if (influence <= 0.0f) continue;
+				influence *= weight;
+			}
+			else if (hasSelection)
+			{
+				if (!mesh.v[i].GetFlag(MN_SEL)) continue;
+				influence = weight;
+			}
+			else
+			{
+				influence = weight;
+			}
+
+			float orig = mesh.v[i].p[axis];
+			mesh.v[i].p[axis] = orig + (flattenValue - orig) * influence;
+		}
+
+		mesh.InvalidateGeomCache();
+		return;
+	}
+
+	// ---- TriObject path ----
+	if (os->obj->IsSubClassOf(triObjectClassID))
+	{
+		TriObject* tri = static_cast<TriObject*>(os->obj);
+		Mesh& mesh = tri->GetMesh();
+
+		float* softSel = mesh.getVSelectionWeights();
+		BitArray& sel = mesh.VertSel();
+		bool hasSelection = sel.AnyBitSet();
+
+		if (mode == 1)
+		{
+			double sum = 0.0;
+			int count = 0;
+			for (int i = 0; i < mesh.numVerts; i++)
+			{
+				// only average verts that will be affected
+				if (softSel)
+				{
+					if (softSel[i] <= 0.0f) continue;
+				}
+				else if (hasSelection)
+				{
+					if (!sel[i]) continue;
+				}
+
+				sum += mesh.verts[i][axis];
+				count++;
+			}
+			if (count > 0)
+				flattenValue = (float)(sum / count);
+		}
+
+		// apply
+		for (int i = 0; i < mesh.numVerts; i++)
+		{
+			float influence;
+
+			if (softSel != nullptr)
+			{
+				influence = softSel[i];
+				if (influence <= 0.0f) continue;
+				influence *= weight;
+			}
+			else if (hasSelection)
+			{
+				if (!sel[i]) continue;
+				influence = weight;
+			}
+			else
+			{
+				influence = weight;
+			}
+
+			float orig = mesh.verts[i][axis];
+			mesh.verts[i][axis] = orig + (flattenValue - orig) * influence;
+		}
+
+		mesh.InvalidateGeomCache();
+		return;
+	}
+}
+void FlattenMod::BeginEditParams(IObjParam* ip, ULONG flags, Animatable* prev)
+{
+	TimeValue t = ip->GetTime();
+	NotifyDependents(Interval(t, t), PART_ALL, REFMSG_BEGIN_EDIT);
+	NotifyDependents(Interval(t, t), PART_ALL, REFMSG_MOD_DISPLAY_ON);
+	SetAFlag(A_MOD_BEING_EDITED);
+
+	GetFlattenModDesc()->BeginEditParams(ip, this, flags, prev);
+
+	// Register the DlgProc for radio button handling
+	flattenmod_param_blk.SetUserDlgProc(new FlattenModDlgProc(this));
+}
+
+void FlattenMod::EndEditParams(IObjParam* ip, ULONG flags, Animatable* next)
+{
+	GetFlattenModDesc()->EndEditParams(ip, this, flags, next);
+
+	TimeValue t = ip->GetTime();
+	ClearAFlag(A_MOD_BEING_EDITED);
+	NotifyDependents(Interval(t, t), PART_ALL, REFMSG_END_EDIT);
+	NotifyDependents(Interval(t, t), PART_ALL, REFMSG_MOD_DISPLAY_OFF);
+}
+
+Interval FlattenMod::GetValidity(TimeValue /*t*/)
+{
+	Interval valid = FOREVER;
+#pragma message(TODO("Return the validity interval of the modifier"))
+	return valid;
+}
+
+RefTargetHandle FlattenMod::Clone(RemapDir& remap)
+{
+	FlattenMod* newmod = new FlattenMod();
+#pragma message(TODO("Add the cloning code here"))
+	newmod->ReplaceReference(PBLOCK_REF, remap.CloneRef(pblock));
+	BaseClone(this, newmod, remap);
+	return (newmod);
+}
+
+// From ReferenceMaker
+RefResult FlattenMod::NotifyRefChanged(const Interval& /*changeInt*/, RefTargetHandle hTarget, PartID& /*partID*/, RefMessage message, BOOL /*propagate*/)
+{
+#pragma message(TODO("Add code to handle the various reference changed messages"))
+	switch (message)
+	{
+	case REFMSG_TARGET_DELETED:
+	{
+		if (hTarget == pblock)
+		{
+			pblock = nullptr;
+		}
+	}
+	break;
+	}
+	return REF_SUCCEED;
+}
+
+/****************************************************************************************
+*
+	NotifyInputChanged is called each time the input object is changed in some way
+	We can find out how it was changed by checking partID and message
+*
+\****************************************************************************************/
+
+void FlattenMod::NotifyInputChanged(const Interval& /*changeInt*/, PartID /*partID*/, RefMessage /*message*/, ModContext* /*mc*/)
+{
+
+}
+
+// From Object
+BOOL FlattenMod::HasUVW()
+{
+#pragma message(TODO("Return whether the object has UVW coordinates or not"))
+	return TRUE;
+}
+
+void FlattenMod::SetGenUVW(BOOL sw)
+{
+	if (sw == HasUVW())
+	{
+		return;
+	}
+
+#pragma message(TODO("Set the plugin internal value to sw"))
+}
+
+IOResult FlattenMod::Load(ILoad* iload)
+{
+	Modifier::Load(iload);
+
+#pragma message(TODO("Add code to allow plugin to load its data"))
+
+	return IO_OK;
+}
+
+IOResult FlattenMod::Save(ISave* isave)
+{
+	Modifier::Save(isave);
+
+#pragma message(TODO("Add code to allow plugin to save its data"))
+
+	return IO_OK;
+}
